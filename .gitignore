@@ -5,4 +5,5 @@ __pycache__/
 *.log
 *.o[0-9]*
 results/
+input/test36-dataset/positions.npy
 .venv/

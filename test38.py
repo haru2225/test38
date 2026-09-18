@@ -788,7 +788,8 @@ def parser():
     p.add_argument("--warm-start", type=Path, default=None,
                    help="Plain (non-time-conditioned) test37 checkpoint to initialize shared weights from")
     p.add_argument("--updates", type=count, default=6000)
-    p.add_argument("--batch-size", type=count, default=16)
+    p.add_argument("--batch-size", type=count, default=1,
+                   help="Graphs per optimizer update; 1 is the safe default for 1292-site GPU jobs")
     p.add_argument("--learning-rate", type=positive, default=2.e-4)
     p.add_argument("--cutoff", type=positive, default=10.0)
     p.add_argument("--large-cutoff", type=positive, default=10.0)

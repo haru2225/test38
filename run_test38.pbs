@@ -25,12 +25,20 @@ args=(--device cuda --time-budget-hours "${TIME_BUDGET_HOURS:-19.5}"
       --checkpoint-every "${CHECKPOINT_EVERY:-25}" --seed "${SEED:-1337}")
 case "${STAGE:-train}" in
     train)
-        dataset="${DATASET_PATH:-$work_dir/input/dataset-pilot}"
+        dataset="${DATASET_PATH:-$work_dir/input/test36-dataset}"
+        # GitHub stores positions.npy as two files because the reconstructed
+        # 148 MiB NumPy file exceeds GitHub's regular-file limit.
+        if [[ -r "$dataset/positions.npy.part00" && -r "$dataset/positions.npy.part01" ]]; then
+            part_bytes=$(( $(wc -c < "$dataset/positions.npy.part00") + $(wc -c < "$dataset/positions.npy.part01") ))
+            if [[ ! -r "$dataset/positions.npy" || $(wc -c < "$dataset/positions.npy") -ne "$part_bytes" ]]; then
+                cat "$dataset/positions.npy.part00" "$dataset/positions.npy.part01" > "$dataset/positions.npy"
+            fi
+        fi
         for name in metadata.json positions.npy cells.npy; do
             [[ -r "$dataset/$name" ]] || { echo "Missing dataset file: $dataset/$name" >&2; exit 2; }
         done
         args=(train --dataset "$dataset" --output "$train_dir"
-              --updates "${UPDATES:-6000}" --batch-size "${BATCH_SIZE:-16}"
+              --updates "${UPDATES:-30000}" --batch-size "${BATCH_SIZE:-1}"
               --cutoff "${CUTOFF:-10.0}" --large-cutoff "${LARGE_CUTOFF:-10.0}"
               --sigma-min "${SIGMA_MIN:-0.001}" --sigma-max "${SIGMA_MAX:-0.75}"
               --learning-rate "${LEARNING_RATE:-0.0002}" --log-every "${LOG_EVERY:-100}"

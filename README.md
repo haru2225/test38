@@ -23,8 +23,14 @@ Apptainer環境ではビルドコマンドの `singularity` を `apptainer` に�
 既定は **sg8・GPU 1台・CPU 8個・32 GB・20時間**、学習時間予算19.5時間です。
 キュー・資源指定は施設に合わせて変更してください。単一GPU実行です。
 CUDA 12.4対応のホストGPUドライバーが必要です。
-既定では同梱の `input/dataset-pilot` を使い、6000更新をゼロから学習します。
+既定では `test37` と同じ `input/test36-dataset`（10,000フレーム）を使い、
+30,000更新をゼロから学習します。`positions.npy` はGitHubのファイルサイズ制限を
+避けるため2分割して保存し、PBSスクリプトが実行時に結合します。
 結果は `results/train/` に保存されます。
+
+1292サイトのグラフでは、sigma条件付きモデルのGPUメモリ使用量が大きくなるため、
+PBSの既定バッチサイズは1です。メモリに余裕があるGPUだけ `BATCH_SIZE=2` 以上へ
+変更してください。
 
 ```bash
 # 学習終了後に構造生成（結果: results/generated/）
@@ -48,8 +54,8 @@ qsub -P <ProjectGroup_ID> -v UPDATES=30000,BATCH_SIZE=16 run_test38.pbs
 
 `DATASET_PATH` にtest36/37で準備したデータセット（`metadata.json`,
 `positions.npy`, `cells.npy`）を指定できます。読み込み時にSHA-256を検証します。
-同梱データはローカルの `test36-aa/dataset-pilot` からコピーした200フレームの
-小規模データです。本番データに置き換える場合も同じ形式を使用してください。
+同梱データはtest37リポジトリの `input/test36-dataset` と同じ10,000フレームの
+データです。本番データに置き換える場合も同じ形式を使用してください。
 データセット作成コマンドはこのリポジトリには含みません。
 
 既存のtest36/37モデルから初期化する場合は、チェックポイントをコピーして
@@ -73,7 +79,7 @@ qsub -P <ProjectGroup_ID> \
 依存パッケージがインストールされた環境では以下でも実行できます。
 
 ```bash
-python test38.py train --dataset input/dataset-pilot --output results/train --device cuda
+python test38.py train --dataset input/test36-dataset --output results/train --device cuda
 python test38.py generate --checkpoint results/train/checkpoint.pt \
   --output results/generated --device cuda
 python test38.py train --help
@@ -87,8 +93,8 @@ python test38.py generate --help
 ## 範囲・出典
 
 これは変位デノイザーによる構造生成であり、エネルギー・力場・物理的な時間を持つ
-MDや平衡分布の検証を提供するものではありません。同梱のpilotデータも平衡性を
-保証しません。生成パラメーターは `test38.py` の実装・既定値を使用しています。
+MDや平衡分布の検証を提供するものではありません。同梱データも平衡性を保証しません。
+生成パラメーターは `test38.py` の実装・既定値を使用しています。
 
 モデル等に含まれるDM2由来コードの出典は `test38.py` に記載し、
 ライセンスを [licenses/DM2-LICENSE](licenses/DM2-LICENSE) に同梱しています。
