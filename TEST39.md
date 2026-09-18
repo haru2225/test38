@@ -69,3 +69,48 @@ test38のチェックポイントは学習目標が違うためtest39の生成�
 学習・生成プログラムが動くことと、粘土の結合・組成・層構造・RDFが正しいことは
 別の検証です。現在のネットワークは10 Åの局所グラフなので、長距離秩序を
 再現できる保証もありません。検証用フレームと生成構造を比較してください。
+
+## 学習途中のチェックポイントから、ランダム配置から生成される過程を確認する
+
+`run_test39.pbs`での学習を止めずに、その時点で保存済みの`checkpoint.pt`だけを
+使って生成できます。`test39_analysis.pbs`は現在の`checkpoint.pt`を別ディレクトリ
+へコピーしてから(atomicなrenameで保存されているため、学習が同時に書き換えて
+いても安全にコピーできます)、そのスナップショットで`test39.py generate`を
+実行します。test38と共通の`test38.sif`をそのまま使います。
+
+```bash
+git pull --ff-only origin main
+qsub -P <ProjectGroup_ID> test39_analysis.pbs
+```
+
+test39の生成は元々**必ず周期セル内の一様ランダムな配置から**始まります
+(test38と違い、参照構造やノイズ幅を指定する`--initial-state`のような
+オプションはありません。これがtest39の設計そのものです)。生成が完了または
+時間切れで中断すると、`test39.py`自身が`generation.xyz`という拡張XYZ形式の
+軌道ファイルを書き出します。1フレーム目(`generation_step=0`)がランダムな
+初期配置、最終フレームが`final.extxyz`と同じ生成結果です。OVITOやVMDでこの
+ファイルを開いて再生すると、ランダムな配置から粘土構造らしきものへ収束して
+いく過程(またはまだ収束していない途中経過)を確認できます。ステップは生成
+計算の番号であり、MDの物理時間ではありません。
+
+既定では`results/test39-cations/train/checkpoint.pt`(`CG_MODE=cations`)を
+読みます。`CG_MODE=oxygen-only`や`CG_MODE=none`で学習した場合は同じ変数を
+指定してください。
+
+```bash
+qsub -P <ProjectGroup_ID> -v CG_MODE=oxygen-only test39_analysis.pbs
+```
+
+出力は毎回新しい`results/test39-cations/intermediate/run.XXXXXXXX/`に作成
+されます。`checkpoint.pt`がコピーした重み、`generated/`が生成結果です。
+実際のパスはジョブログに表示します。ジョブ開始時点の保存済みチェックポイント
+を固定するため、その後も学習が進んでいてもこの生成結果は変わりません。
+まだチェックポイントが保存されていない場合はエラーで終了します。
+
+生成ステップ数(既定300)や時間予算は変数で変更できます。
+
+```bash
+qsub -P <ProjectGroup_ID> -v REVERSE_STEPS=100,GENERATE_TIME_HOURS=2 test39_analysis.pbs
+```
+
+学習ジョブとは別のGPU割り当てを待つため、空き状況によっては待機します。
