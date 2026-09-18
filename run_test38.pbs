@@ -38,7 +38,7 @@ case "${STAGE:-train}" in
             [[ -r "$dataset/$name" ]] || { echo "Missing dataset file: $dataset/$name" >&2; exit 2; }
         done
         args=(train --dataset "$dataset" --output "$train_dir"
-              --updates "${UPDATES:-30000}" --batch-size "${BATCH_SIZE:-1}"
+              --updates "${UPDATES:-30000}" --batch-size "${BATCH_SIZE:-2}"
               --cutoff "${CUTOFF:-10.0}" --large-cutoff "${LARGE_CUTOFF:-10.0}"
               --sigma-min "${SIGMA_MIN:-0.001}" --sigma-max "${SIGMA_MAX:-0.75}"
               --learning-rate "${LEARNING_RATE:-0.0002}" --log-every "${LOG_EVERY:-100}"
