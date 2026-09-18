@@ -35,6 +35,9 @@ PBSの既定バッチサイズは2です。メモリが足りない場合は `BA
 # 学習終了後に構造生成（結果: results/generated/）
 qsub -P <ProjectGroup_ID> -v STAGE=generate run_test38.pbs
 
+# 途中生成の構造をスパコン上で診断
+qsub -P <ProjectGroup_ID> -v STAGE=analyze run_test38.pbs
+
 # 時間切れなどで中断した学習・生成を再開
 qsub -P <ProjectGroup_ID> -v RESUME=1 run_test38.pbs
 qsub -P <ProjectGroup_ID> -v STAGE=generate,RESUME=1 run_test38.pbs
@@ -88,6 +91,65 @@ python test38.py generate --help
 `--device cpu` でCPU実行も可能です。生成結果は `positions.npy`,
 `generation.json`, `generation_restart.pt`, `final.extxyz` に保存されます。
 途中の軌跡は `generation.json` の `valid_frames` までが有効です。
+
+## 途中チェックポイントの確認
+
+学習が30,000更新に達する前でも、保存済みの `checkpoint.pt` は生成に使えます。
+別の出力先へ生成し、参照データとの構造診断を実行してください。
+
+```bash
+python test38.py generate \
+  --checkpoint results/train/checkpoint.pt \
+  --output results/generated-intermediate \
+  --device cuda --time-budget-hours 19.5
+
+python analyze_test38.py \
+  --reference input/test36-dataset \
+  --checkpoint results/train/checkpoint.pt \
+  --generated results/generated-intermediate \
+  --output results/generated-intermediate-analysis.json
+```
+
+解析はNaN、最小原子間距離、フレーム間の変位、参照データとのRDF差を記録します。
+途中生成は `generation_complete=false` として報告され、未完了のチェックポイントである
+ことを示します。`status=pass` は構造上の簡易検査を通った意味で、平衡性や物理的妥当性を
+保証しません。
+
+CGMD軌道を別途作成済みなら、`md.extxyz` を追加指定して同じ検査を行えます。
+
+```bash
+python analyze_test38.py \
+  --reference input/test36-dataset \
+  --checkpoint results/train/checkpoint.pt \
+  --generated results/generated-intermediate \
+  --cgmd results/cgmd/md.extxyz \
+  --output results/intermediate-analysis.json
+```
+
+`test38.py`にはtest37のようなCGMD生成サブコマンドはありません。このスクリプトの
+`--cgmd`は既存のASE/extxyz軌道を解析するためのオプションです。
+
+GitHubから既存のチェックアウトを更新する場合は、スパコン上で次を実行します。
+
+```bash
+cd /path/to/test38
+git pull --ff-only origin main
+```
+
+解析をPBSで実行する場合は、先に`STAGE=generate`で生成を完了または中断保存し、
+同じチェックアウトから次を投入します。
+
+```bash
+qsub -P <ProjectGroup_ID> -v STAGE=analyze run_test38.pbs
+```
+
+既存のCGMD軌道も同時に調べる場合は、`CGMD_PATH`を指定します。
+
+```bash
+qsub -P <ProjectGroup_ID> \
+  -v STAGE=analyze,CGMD_PATH=/scratch/my-run/md.extxyz \
+  run_test38.pbs
+```
 
 ## 範囲・出典
 
