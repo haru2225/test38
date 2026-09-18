@@ -261,6 +261,8 @@ def atoms_from_meta(positions, cell, meta):
                   positions=positions, cell=cell, pbc=True,
                   masses=[meta["species"][i]["mass_amu"] for i in ids])
     atoms.set_array("cg_type", ids.copy())
+    atoms.set_array("site_id", np.arange(len(ids), dtype=int))
+    atoms.set_array("cg_species", np.asarray([meta["species"][i]["name"] for i in ids]))
     return atoms
 
 

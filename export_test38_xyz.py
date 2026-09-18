@@ -47,6 +47,18 @@ def export(folder, output=None):
                               is_equilibrium_trajectory=False)
             atoms.wrap()
             ase.io.write(stream, atoms, format="extxyz")
+    final_path = folder / "final.extxyz"
+    if metadata.get("complete") and final_path.is_file():
+        movie_final = ase.io.read(temporary, index=-1, format="extxyz")
+        saved_final = ase.io.read(final_path)
+        if (not np.array_equal(movie_final.numbers, saved_final.numbers)
+                or not np.allclose(movie_final.cell.array, saved_final.cell.array, atol=1e-7, rtol=0)
+                or not np.allclose(movie_final.positions, saved_final.positions, atol=1e-5, rtol=0)):
+            temporary.unlink()
+            raise ValueError(
+                "Final XYZ frame differs from final.extxyz in the same generated directory; "
+                "check that both files belong to the same generation run"
+            )
     temporary.replace(output)
     print(f"XYZ movie: {output} ({valid} frames; initial_state={initial_state})", flush=True)
     return output
