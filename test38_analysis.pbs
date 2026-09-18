@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Snapshot training weights, generate from random positions, export XYZ, analyze.
+# Snapshot training weights, generate from training-scale noise, export XYZ, analyze.
 # Usage: qsub -P <ProjectGroup_ID> test38_analysis.pbs
 # Override CHECKPOINT_PATH, GENERATED_DIR, ANALYSIS_PATH and CGMD_PATH as needed.
 #PBS -q sg8
@@ -55,7 +55,7 @@ run_python() {
 generation_status=0
 run_python "$work_dir/test38.py" generate --checkpoint "$snapshot" \
     --output "$generated" --device cuda \
-    --initial-state "${INITIAL_STATE:-noise}" \
+    --initial-state "${INITIAL_STATE:-rattled}" \
     --reverse-steps "${REVERSE_STEPS:-300}" --deterministic-steps "${DETERMINISTIC_STEPS:-30}" \
     --start-sigma "${START_SIGMA:-0.75}" --sigma-min "${SIGMA_MIN:-0.001}" \
     --thermal-scale "${THERMAL_SCALE:-1}" --seed "${SEED:-1337}" \

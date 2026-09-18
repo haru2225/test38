@@ -699,6 +699,8 @@ def generate(args):
     meta, cell = ck["dataset_metadata"], ck["cell_angstrom"]
     cutoff = ck["architecture"]["cutoff_angstrom"]
     sigma_max_train = ck["settings"]["sigma_max"]
+    if args.initial_state == "rattled" and args.start_sigma > sigma_max_train:
+        raise ValueError("rattled initial state requires start-sigma <= training sigma-max")
     output = args.output.resolve() if args.resume else new_output(args.output)
     settings = dict(
         checkpoint_sha256=digest(args.checkpoint), reverse_steps=args.reverse_steps,
@@ -729,6 +731,10 @@ def generate(args):
                 cell, dtype=pos.dtype, device=device)
             print("Experimental initialization: independent uniform positions in the cell; "
                   "the trained local-noise denoiser may not recover a valid structure.", flush=True)
+        elif args.initial_state == "rattled":
+            pos = pos + args.start_sigma * torch.randn_like(pos)
+            print(f"Initialization: reference plus Gaussian noise at "
+                  f"sigma={args.start_sigma:g} A, within the training range.", flush=True)
         completed = 0
         trajectory = np.lib.format.open_memmap(
             output / "positions.npy", mode="w+", dtype=np.float32, shape=(total + 1, len(pos), 3)
@@ -814,8 +820,8 @@ def parser():
     p.set_defaults(handler=train)
 
     p = sub.add_parser("generate", help="annealed-Langevin / variance-exploding reverse-SDE sampler with a DDIM polish tail")
-    p.add_argument("--initial-state", choices=("reference", "noise"), default="reference",
-                   help="reference coordinates or independent uniform random positions in the periodic cell")
+    p.add_argument("--initial-state", choices=("reference", "rattled", "noise"), default="reference",
+                   help="reference, reference plus Gaussian noise, or experimental uniform random positions")
     p.add_argument("--reverse-steps", type=count, default=300)
     p.add_argument("--deterministic-steps", type=nonnegative_count, default=30)
     p.add_argument("--start-sigma", type=positive, default=0.75)
