@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#PBS -q sg8
+#PBS -N test38_clay
+#PBS -l walltime=20:00:00
+#PBS -l select=1:ncpus=8:mpiprocs=1:ompthreads=8:mem=32gb:ngpus=1
+#PBS -j oe
+set -euo pipefail
+
+cd "${PBS_O_WORKDIR:-$(dirname "${BASH_SOURCE[0]}")}"
+work_dir="$(pwd -P)"
+runtime="${CONTAINER_RUNTIME:-singularity}"
+if ! command -v "$runtime" >/dev/null 2>&1 && command -v apptainer >/dev/null 2>&1; then
+    runtime=apptainer
+fi
+command -v "$runtime" >/dev/null 2>&1 || { echo 'Load singularity or apptainer first.' >&2; exit 2; }
+sif="${SIF_IMAGE:-$work_dir/test38.sif}"
+[[ -r "$sif" ]] || { echo "Build the image first: $runtime build --fakeroot test38.sif Singularity.test38.def" >&2; exit 2; }
+
+# Bind host paths at the same absolute location. Keep input/output inside the
+# checkout; EXTRA_BIND can expose additional storage (e.g. /scratch:/scratch).
+bind_args=(--bind "$work_dir:$work_dir")
+if [[ -n "${EXTRA_BIND:-}" ]]; then bind_args+=(--bind "$EXTRA_BIND"); fi
+train_dir="${TRAIN_DIR:-$work_dir/results/train}"
+args=(--device cuda --time-budget-hours "${TIME_BUDGET_HOURS:-19.5}"
+      --checkpoint-every "${CHECKPOINT_EVERY:-25}" --seed "${SEED:-1337}")
+case "${STAGE:-train}" in
+    train)
+        dataset="${DATASET_PATH:-$work_dir/input/dataset-pilot}"
+        for name in metadata.json positions.npy cells.npy; do
+            [[ -r "$dataset/$name" ]] || { echo "Missing dataset file: $dataset/$name" >&2; exit 2; }
+        done
+        args=(train --dataset "$dataset" --output "$train_dir"
+              --updates "${UPDATES:-6000}" --batch-size "${BATCH_SIZE:-16}"
+              --cutoff "${CUTOFF:-10.0}" --large-cutoff "${LARGE_CUTOFF:-10.0}"
+              --sigma-min "${SIGMA_MIN:-0.001}" --sigma-max "${SIGMA_MAX:-0.75}"
+              --learning-rate "${LEARNING_RATE:-0.0002}" --log-every "${LOG_EVERY:-100}"
+              "${args[@]}")
+        if [[ -n "${WARM_START:-}" ]]; then
+            [[ -r "$WARM_START" ]] || { echo "Missing warm-start checkpoint: $WARM_START" >&2; exit 2; }
+            args+=(--warm-start "$WARM_START")
+        fi
+        ;;
+    generate)
+        checkpoint="${CHECKPOINT_PATH:-$train_dir/checkpoint.pt}"
+        [[ -r "$checkpoint" ]] || { echo "Missing test38 checkpoint: $checkpoint" >&2; exit 2; }
+        args=(generate --checkpoint "$checkpoint"
+              --output "${GENERATED_DIR:-$work_dir/results/generated}"
+              --reverse-steps "${REVERSE_STEPS:-300}" --deterministic-steps "${DETERMINISTIC_STEPS:-30}"
+              --start-sigma "${START_SIGMA:-0.75}" --sigma-min "${SIGMA_MIN:-0.001}"
+              --thermal-scale "${THERMAL_SCALE:-1.0}" "${args[@]}")
+        ;;
+    *) echo 'STAGE must be train or generate.' >&2; exit 2 ;;
+esac
+case "${RESUME:-0}" in
+    0) ;;
+    1) args+=(--resume) ;;
+    *) echo 'RESUME must be 0 or 1.' >&2; exit 2 ;;
+esac
+
+exec "$runtime" exec --nv "${bind_args[@]}" \
+    --env OMP_NUM_THREADS=8 --env MKL_NUM_THREADS=8 --pwd "$work_dir" \
+    "$sif" python -u "$work_dir/test38.py" "${args[@]}"

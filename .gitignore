@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.sif
+*.pt
+*.log
+*.o[0-9]*
+results/
+.venv/
