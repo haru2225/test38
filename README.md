@@ -35,15 +35,12 @@ PBSの既定バッチサイズは2です。メモリが足りない場合は `BA
 # 学習終了後に構造生成（結果: results/generated/）
 qsub -P <ProjectGroup_ID> -v STAGE=generate run_test38.pbs
 
-# 途中生成の構造をスパコン上で診断
-qsub -P <ProjectGroup_ID> -v STAGE=analyze run_test38.pbs
-
 # 時間切れなどで中断した学習・生成を再開
 qsub -P <ProjectGroup_ID> -v RESUME=1 run_test38.pbs
 qsub -P <ProjectGroup_ID> -v STAGE=generate,RESUME=1 run_test38.pbs
 
 # 学習更新数とバッチサイズを指定
-qsub -P <ProjectGroup_ID> -v UPDATES=30000,BATCH_SIZE=16 run_test38.pbs
+qsub -P <ProjectGroup_ID> -v UPDATES=30000,BATCH_SIZE=2 run_test38.pbs
 ```
 
 再開時はデータ・デバイス・学習/生成設定を初回と同じにしてください。
@@ -140,15 +137,15 @@ git pull --ff-only origin main
 同じチェックアウトから次を投入します。
 
 ```bash
-qsub -P <ProjectGroup_ID> -v STAGE=analyze run_test38.pbs
+qsub -P <ProjectGroup_ID> test38_analysis.pbs
 ```
 
 既存のCGMD軌道も同時に調べる場合は、`CGMD_PATH`を指定します。
 
 ```bash
 qsub -P <ProjectGroup_ID> \
-  -v STAGE=analyze,CGMD_PATH=/scratch/my-run/md.extxyz \
-  run_test38.pbs
+  -v CGMD_PATH=/scratch/my-run/md.extxyz \
+  test38_analysis.pbs
 ```
 
 ## 範囲・出典

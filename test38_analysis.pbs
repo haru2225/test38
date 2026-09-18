@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Analyze an intermediate test38 generation (and optionally an existing CGMD).
+# Usage: qsub -P <ProjectGroup_ID> test38_analysis.pbs
+# Override CHECKPOINT_PATH, GENERATED_DIR, ANALYSIS_PATH and CGMD_PATH as needed.
+#PBS -q sg8
+#PBS -N test38_analysis
+#PBS -l walltime=02:00:00
+#PBS -l select=1:ncpus=4:mpiprocs=1:ompthreads=4:mem=16gb:ngpus=0
+#PBS -j oe
+set -euo pipefail
+
+cd "${PBS_O_WORKDIR:-$(dirname "${BASH_SOURCE[0]}")}"
+work_dir="$(pwd -P)"
+runtime="${CONTAINER_RUNTIME:-singularity}"
+if ! command -v "$runtime" >/dev/null 2>&1 && command -v apptainer >/dev/null 2>&1; then
+    runtime=apptainer
+fi
+command -v "$runtime" >/dev/null 2>&1 || { echo 'Load singularity or apptainer first.' >&2; exit 2; }
+sif="${SIF_IMAGE:-$work_dir/test38.sif}"
+[[ -r "$sif" ]] || { echo "Missing SIF image: $sif" >&2; exit 2; }
+
+dataset="${DATASET_PATH:-$work_dir/input/test36-dataset}"
+if [[ -r "$dataset/positions.npy.part00" && -r "$dataset/positions.npy.part01" ]]; then
+    part_bytes=$(( $(wc -c < "$dataset/positions.npy.part00") + $(wc -c < "$dataset/positions.npy.part01") ))
+    if [[ ! -r "$dataset/positions.npy" || $(wc -c < "$dataset/positions.npy") -ne "$part_bytes" ]]; then
+        cat "$dataset/positions.npy.part00" "$dataset/positions.npy.part01" > "$dataset/positions.npy"
+    fi
+fi
+checkpoint="${CHECKPOINT_PATH:-$work_dir/results/train/checkpoint.pt}"
+generated="${GENERATED_DIR:-$work_dir/results/generated-intermediate}"
+analysis="${ANALYSIS_PATH:-$work_dir/results/generated-intermediate-analysis.json}"
+[[ -r "$dataset/metadata.json" && -r "$dataset/positions.npy" && -r "$dataset/cells.npy" ]] || { echo "Incomplete dataset: $dataset" >&2; exit 2; }
+[[ -r "$checkpoint" ]] || { echo "Missing checkpoint: $checkpoint" >&2; exit 2; }
+[[ -r "$generated/positions.npy" ]] || { echo "Missing generated trajectory: $generated/positions.npy" >&2; exit 2; }
+
+bind_args=(--bind "$work_dir:$work_dir")
+if [[ -n "${EXTRA_BIND:-}" ]]; then bind_args+=(--bind "$EXTRA_BIND"); fi
+args=(--reference "$dataset" --checkpoint "$checkpoint" --generated "$generated" --output "$analysis"
+      --max-frames "${MAX_FRAMES:-20}" --r-max "${R_MAX:-10}" --bins "${RDF_BINS:-100}")
+if [[ -n "${CGMD_PATH:-}" ]]; then args+=(--cgmd "$CGMD_PATH"); fi
+
+exec "$runtime" exec "${bind_args[@]}" \
+    --env OMP_NUM_THREADS=4 --env MKL_NUM_THREADS=4 --pwd "$work_dir" \
+    "$sif" python -u "$work_dir/analyze_test38.py" "${args[@]}"
