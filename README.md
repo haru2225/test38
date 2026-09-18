@@ -133,12 +133,23 @@ cd /path/to/test38
 git pull --ff-only origin main
 ```
 
-解析をPBSで実行する場合は、先に`STAGE=generate`で生成を完了または中断保存し、
-同じチェックアウトから次を投入します。
+途中学習の確認は、以下の1ジョブでチェックポイントのコピー・生成・解析まで実行します。
+学習を止める必要はありません。`run_test38.pbs` の変更も不要です。
 
 ```bash
 qsub -P <ProjectGroup_ID> test38_analysis.pbs
 ```
+
+既定では `results/train/checkpoint.pt` を読み、なければ `train/checkpoint.pt` を探します。
+別の保存先なら `-v TRAIN_DIR=/path/to/train` または `CHECKPOINT_PATH` を指定します。
+ジョブ開始時の保存済みチェックポイントをコピーして固定するため、学習が進んでも
+生成と解析は同じ重みを使用します。まだチェックポイントが保存されていない場合は終了します。
+
+出力は毎回新しい `results/intermediate/run.XXXXXXXX/` に作成されます。
+`checkpoint.pt` がコピーした重み、`generated/` が生成結果、`analysis.json` が解析結果です。
+実際のパスはPBSログに表示します。GPU 1台・20時間を要求し、生成に18時間を割り当てます。
+生成の時間予算に達した場合は保存済みの有効フレームだけを解析し、終了コード75を返します。
+学習ジョブとは別のGPU割り当てを待つため、空き状況によっては待機します。
 
 既存のCGMD軌道も同時に調べる場合は、`CGMD_PATH`を指定します。
 

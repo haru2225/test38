@@ -84,6 +84,11 @@ def read_generated(folder, checkpoint):
     cell = np.asarray(ck["cell_angstrom"], dtype=float)
     cells = np.broadcast_to(cell, (len(positions), 3, 3))
     generation = json.loads((folder / "generation.json").read_text()) if (folder / "generation.json").exists() else {}
+    valid = generation.get("valid_frames")
+    if not isinstance(valid, int) or not 1 <= valid <= len(positions):
+        raise ValueError("generation.json must specify valid_frames within the stored trajectory")
+    positions = positions[:valid]
+    cells = cells[:valid]
     return positions, cells, generation
 
 

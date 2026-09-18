@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Analyze an intermediate test38 generation (and optionally an existing CGMD).
+# Snapshot training weights, generate structures, then analyze them.
 # Usage: qsub -P <ProjectGroup_ID> test38_analysis.pbs
 # Override CHECKPOINT_PATH, GENERATED_DIR, ANALYSIS_PATH and CGMD_PATH as needed.
 #PBS -q sg8
 #PBS -N test38_analysis
-#PBS -l walltime=02:00:00
-#PBS -l select=1:ncpus=4:mpiprocs=1:ompthreads=4:mem=16gb:ngpus=0
+#PBS -l walltime=20:00:00
+#PBS -l select=1:ncpus=8:mpiprocs=1:ompthreads=8:mem=32gb:ngpus=1
 #PBS -j oe
 set -euo pipefail
 
@@ -26,19 +26,48 @@ if [[ -r "$dataset/positions.npy.part00" && -r "$dataset/positions.npy.part01" ]
         cat "$dataset/positions.npy.part00" "$dataset/positions.npy.part01" > "$dataset/positions.npy"
     fi
 fi
-checkpoint="${CHECKPOINT_PATH:-$work_dir/results/train/checkpoint.pt}"
-generated="${GENERATED_DIR:-$work_dir/results/generated-intermediate}"
-analysis="${ANALYSIS_PATH:-$work_dir/results/generated-intermediate-analysis.json}"
+checkpoint="${CHECKPOINT_PATH:-${TRAIN_DIR:-$work_dir/results/train}/checkpoint.pt}"
+if [[ -z "${CHECKPOINT_PATH:-}" && -z "${TRAIN_DIR:-}" && ! -r "$checkpoint" && -r "$work_dir/train/checkpoint.pt" ]]; then
+    checkpoint="$work_dir/train/checkpoint.pt"
+fi
 [[ -r "$dataset/metadata.json" && -r "$dataset/positions.npy" && -r "$dataset/cells.npy" ]] || { echo "Incomplete dataset: $dataset" >&2; exit 2; }
 [[ -r "$checkpoint" ]] || { echo "Missing checkpoint: $checkpoint" >&2; exit 2; }
-[[ -r "$generated/positions.npy" ]] || { echo "Missing generated trajectory: $generated/positions.npy" >&2; exit 2; }
+
+# Each submission has its own immutable checkpoint and output directory.
+# test38 saves training checkpoints by atomic rename, so copying the opened
+# file remains consistent even when training replaces checkpoint.pt meanwhile.
+mkdir -p "$work_dir/results/intermediate"
+run_dir="$(mktemp -d "$work_dir/results/intermediate/run.XXXXXXXX")"
+snapshot="$run_dir/checkpoint.pt"
+cp "$checkpoint" "$snapshot"
+generated="${GENERATED_DIR:-$run_dir/generated}"
+analysis="${ANALYSIS_PATH:-$run_dir/analysis.json}"
+echo "Source checkpoint: $checkpoint"
+echo "Snapshot and results: $run_dir"
 
 bind_args=(--bind "$work_dir:$work_dir")
 if [[ -n "${EXTRA_BIND:-}" ]]; then bind_args+=(--bind "$EXTRA_BIND"); fi
-args=(--reference "$dataset" --checkpoint "$checkpoint" --generated "$generated" --output "$analysis"
+run_python() {
+    "$runtime" exec --nv "${bind_args[@]}" \
+        --env OMP_NUM_THREADS=8 --env MKL_NUM_THREADS=8 --pwd "$work_dir" \
+        "$sif" python -u "$@"
+}
+generation_status=0
+run_python "$work_dir/test38.py" generate --checkpoint "$snapshot" \
+    --output "$generated" --device cuda \
+    --reverse-steps "${REVERSE_STEPS:-300}" --deterministic-steps "${DETERMINISTIC_STEPS:-30}" \
+    --start-sigma "${START_SIGMA:-0.75}" --sigma-min "${SIGMA_MIN:-0.001}" \
+    --thermal-scale "${THERMAL_SCALE:-1}" --seed "${SEED:-1337}" \
+    --checkpoint-every "${CHECKPOINT_EVERY:-25}" \
+    --time-budget-hours "${GENERATE_TIME_HOURS:-18}" || generation_status=$?
+if [[ "$generation_status" -ne 0 && "$generation_status" -ne 75 ]]; then
+    echo "Generation failed (exit $generation_status); inspect the job log." >&2
+    exit "$generation_status"
+fi
+args=(--reference "$dataset" --checkpoint "$snapshot" --generated "$generated" --output "$analysis"
       --max-frames "${MAX_FRAMES:-20}" --r-max "${R_MAX:-10}" --bins "${RDF_BINS:-100}")
 if [[ -n "${CGMD_PATH:-}" ]]; then args+=(--cgmd "$CGMD_PATH"); fi
 
-exec "$runtime" exec "${bind_args[@]}" \
-    --env OMP_NUM_THREADS=4 --env MKL_NUM_THREADS=4 --pwd "$work_dir" \
-    "$sif" python -u "$work_dir/analyze_test38.py" "${args[@]}"
+run_python "$work_dir/analyze_test38.py" "${args[@]}"
+echo "Analysis saved: $analysis"
+exit "$generation_status"
