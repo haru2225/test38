@@ -690,6 +690,8 @@ def train(args):
 def generate(args):
     if args.start_sigma < 0.001:
         raise ValueError("start-sigma must be at least 0.001 angstrom")
+    if args.deterministic_steps > args.reverse_steps:
+        raise ValueError("deterministic-steps must not exceed reverse-steps")
     device = device_for(args.device)
     model, ck = checkpoint_time_model(args.checkpoint, device)
     meta, cell = ck["dataset_metadata"], ck["cell_angstrom"]
@@ -701,12 +703,15 @@ def generate(args):
         deterministic_steps=args.deterministic_steps, start_sigma=args.start_sigma,
         sigma_min=args.sigma_min, thermal_scale=args.thermal_scale,
         seed=args.seed, device=str(device), cutoff_angstrom=cutoff,
+        initial_state=args.initial_state,
     )
     total = args.reverse_steps
     state_path = output / "generation_restart.pt"
     if args.resume:
         state = torch.load(state_path, map_location="cpu", weights_only=False)
-        if state["settings"] != settings:
+        saved_settings = dict(state["settings"])
+        saved_settings.setdefault("initial_state", "reference")
+        if saved_settings != settings:
             raise ValueError("Generation resume settings differ; use a new output directory")
         pos, completed = state["positions"].to(device), state["step"]
         restore_rng(state["rng"])
@@ -715,6 +720,13 @@ def generate(args):
         torch.manual_seed(args.seed)
         np.random.seed(args.seed)
         pos = torch.tensor(ck["start_positions_angstrom"], dtype=torch.float32, device=device)
+        if args.initial_state == "noise":
+            # Independent uniform fractional coordinates: no reference geometry
+            # remains. Keep composition, site ordering, and the periodic cell.
+            pos = torch.rand(pos.shape, dtype=pos.dtype, device=device) @ torch.as_tensor(
+                cell, dtype=pos.dtype, device=device)
+            print("Experimental initialization: independent uniform positions in the cell; "
+                  "the trained local-noise denoiser may not recover a valid structure.", flush=True)
         completed = 0
         trajectory = np.lib.format.open_memmap(
             output / "positions.npy", mode="w+", dtype=np.float32, shape=(total + 1, len(pos), 3)
@@ -800,6 +812,8 @@ def parser():
     p.set_defaults(handler=train)
 
     p = sub.add_parser("generate", help="annealed-Langevin / variance-exploding reverse-SDE sampler with a DDIM polish tail")
+    p.add_argument("--initial-state", choices=("reference", "noise"), default="reference",
+                   help="reference coordinates or independent uniform random positions in the periodic cell")
     p.add_argument("--reverse-steps", type=count, default=300)
     p.add_argument("--deterministic-steps", type=nonnegative_count, default=30)
     p.add_argument("--start-sigma", type=positive, default=0.75)

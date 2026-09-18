@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Snapshot training weights, generate structures, then analyze them.
+# Snapshot training weights, generate from random positions, export XYZ, analyze.
 # Usage: qsub -P <ProjectGroup_ID> test38_analysis.pbs
 # Override CHECKPOINT_PATH, GENERATED_DIR, ANALYSIS_PATH and CGMD_PATH as needed.
 #PBS -q sg8
@@ -55,6 +55,7 @@ run_python() {
 generation_status=0
 run_python "$work_dir/test38.py" generate --checkpoint "$snapshot" \
     --output "$generated" --device cuda \
+    --initial-state "${INITIAL_STATE:-noise}" \
     --reverse-steps "${REVERSE_STEPS:-300}" --deterministic-steps "${DETERMINISTIC_STEPS:-30}" \
     --start-sigma "${START_SIGMA:-0.75}" --sigma-min "${SIGMA_MIN:-0.001}" \
     --thermal-scale "${THERMAL_SCALE:-1}" --seed "${SEED:-1337}" \
@@ -64,6 +65,7 @@ if [[ "$generation_status" -ne 0 && "$generation_status" -ne 75 ]]; then
     echo "Generation failed (exit $generation_status); inspect the job log." >&2
     exit "$generation_status"
 fi
+run_python "$work_dir/export_test38_xyz.py" --generated "$generated"
 args=(--reference "$dataset" --checkpoint "$snapshot" --generated "$generated" --output "$analysis"
       --max-frames "${MAX_FRAMES:-20}" --r-max "${R_MAX:-10}" --bins "${RDF_BINS:-100}")
 if [[ -n "${CGMD_PATH:-}" ]]; then args+=(--cgmd "$CGMD_PATH"); fi

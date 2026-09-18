@@ -137,6 +137,7 @@ def main():
         "generated": gen_report,
         "generation_complete": generation.get("complete"),
         "generation_valid_frames": generation.get("valid_frames"),
+        "initial_state": generation.get("settings", {}).get("initial_state", "reference"),
         "settings": {"r_max_A": args.r_max, "bins": args.bins, "max_frames": args.max_frames},
         "scientific_caveat": "Structural smoke diagnostics only; this does not establish equilibrium or physical CGMD validity.",
     }
@@ -149,6 +150,8 @@ def main():
         result["cgmd"] = cg_report
 
     warnings = []
+    if result["initial_state"] == "noise":
+        warnings.append("generated: experimental uniform random initialization; structural recovery is not guaranteed")
     for name in ("generated", "cgmd"):
         report = result.get(name)
         if report is None:
