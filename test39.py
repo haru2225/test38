@@ -15,8 +15,10 @@ It requires training from scratch; test38 checkpoints use another target.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
+import shutil
 import time
 from pathlib import Path
 
@@ -27,6 +29,73 @@ import torch
 import test38 as base
 
 FORMAT = "test39-periodic-full-noise-v1"
+
+
+def coarse_grain(args):
+    """Retain selected sites at their original coordinates; omit oxygen/OH sites.
+
+    This is a site-selection CG mapping. It does not combine overlapping SiO4
+    and AlO6 groups or silently redistribute their shared oxygen masses.
+    """
+    positions, cells, source = base.load_dataset(args.dataset)
+    names = [species["name"] for species in source["species"]]
+    if len(set(names)) != len(names):
+        raise ValueError("Dataset species names must be unique")
+    removed_names = set(args.remove_species)
+    if removed_names - set(names):
+        raise ValueError(f"Unknown species to remove: {sorted(removed_names - set(names))}")
+    old_types = np.asarray(source["type_ids"], dtype=int)
+    kept = np.flatnonzero([names[i] not in removed_names for i in old_types])
+    if len(kept) < 2:
+        raise ValueError("At least two sites must remain after coarse graining")
+    if len(kept) == len(old_types):
+        raise ValueError("No sites selected for removal")
+    used_types = sorted(set(old_types[kept].tolist()))
+    new_ids = {old: new for new, old in enumerate(used_types)}
+    meta = copy.deepcopy(source)
+    meta["species"] = [copy.deepcopy(source["species"][i]) for i in used_types]
+    meta["type_ids"] = [new_ids[int(i)] for i in old_types[kept]]
+    description = (
+        "Site-selection CG: omit " + ", ".join(sorted(removed_names)) +
+        "; keep retained-site coordinates. Export masses are retained atomic-site masses, "
+        "not effective group masses. Omitted atoms cannot be reconstructed from this model."
+    )
+    if "mapping" in meta:
+        mapping = meta["mapping"]
+        if len(mapping.get("sites", [])) != len(old_types):
+            raise ValueError("Source mapping sites do not match the dataset site order")
+        mapping["sites"] = [mapping["sites"][int(i)] for i in kept]
+        mapping["species"] = copy.deepcopy(meta["species"])
+        mapping["description"] = description
+    meta["coarse_graining"] = dict(
+        method="retained-site-selection", removed_species=sorted(removed_names),
+        source_dataset_sha256=source["sha256"],
+        source_metadata_sha256=base.digest(args.dataset / "metadata.json"),
+        source_sites=len(old_types), retained_sites=len(kept),
+        retained_source_site_indices=kept.tolist(), mass_policy="retained-site masses only",
+    )
+    meta["scientific_caveat"] = str(source.get("scientific_caveat", "")) + " " + description
+    if args.reuse and (args.output / "metadata.json").is_file():
+        _, _, existing = base.load_dataset(args.output)
+        expected = {key: value for key, value in meta.items() if key != "sha256"}
+        actual = {key: value for key, value in existing.items() if key != "sha256"}
+        if actual != expected:
+            raise ValueError("Existing coarse dataset has different source or mapping; choose a new output path")
+        print(f"Verified existing coarse dataset: {args.output}", flush=True)
+        return 0
+    output = base.new_output(args.output)
+    reduced = np.lib.format.open_memmap(output / "positions.npy", mode="w+",
+                                       dtype=positions.dtype, shape=(len(positions), len(kept), 3))
+    for start in range(0, len(positions), 128):
+        reduced[start:start + 128] = positions[start:start + 128, kept, :]
+    reduced.flush()
+    shutil.copyfile(args.dataset / "cells.npy", output / "cells.npy")
+    meta["sha256"] = {name: base.digest(output / name) for name in ("positions.npy", "cells.npy")}
+    base.save_json(output / "metadata.json", meta)
+    ase.io.write(output / "reference.extxyz", base.atoms_from_meta(reduced[0], cells[0], meta))
+    print(f"Coarse-grained {len(old_types)} -> {len(kept)} sites, {len(positions)} frames: {output}", flush=True)
+    print("Remaining species: " + ", ".join(s["name"] for s in meta["species"]), flush=True)
+    return 0
 
 
 def cell_lengths(cell):
@@ -284,6 +353,13 @@ def generate(args):
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
     sub = root.add_subparsers(dest="stage", required=True)
+    cg_p = sub.add_parser("coarse-grain", help="Remove clay oxygen/OH sites from a prepared dataset")
+    cg_p.add_argument("--dataset", type=Path, required=True)
+    cg_p.add_argument("--output", type=Path, required=True)
+    cg_p.add_argument("--reuse", action="store_true", help="Reuse only a verified dataset with the same source and selection")
+    cg_p.add_argument("--remove-species", nargs="+", default=["ob", "obos", "oh", "ohs", "ho"],
+                      help="Species labels to omit; default removes clay O and hydroxyl H")
+    cg_p.set_defaults(handler=coarse_grain)
     train_p = sub.add_parser("train")
     train_p.add_argument("--dataset", type=Path, required=True)
     train_p.add_argument("--updates", type=base.count, default=30000)
